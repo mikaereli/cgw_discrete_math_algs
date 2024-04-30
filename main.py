@@ -13,7 +13,6 @@ fuzzy_result_label = None
 tree_table_before = None
 tree_table_after = None
 
-
 def trapezoidal_mf(x, a, b, c, d):
     mf = []
     for i in x:
@@ -29,17 +28,25 @@ def trapezoidal_mf(x, a, b, c, d):
             mf.append(0)
     return mf
 
-def mean_of_maximum(x, mf):
+def defuzzify_mean_of_maximum(x, mf):
     max_val = max(mf)
     indices = [i for i, v in enumerate(mf) if v == max_val]
-    return sum(x[i] for i in indices) / len(indices)
+    return round(sum(x[i] for i in indices) / len(indices))
 
 def calculate_result():
     global params_entry, ax, canvas, fuzzy_table, result_label
     params = [float(p.strip()) for p in params_entry.get().split(',')]
     a, b, c, d = params
+    
+    # Проверка входных данных
+    if a >= b or b >= c or c >= d:
+        result_label.config(text="Ошибка: Параметры должны быть в порядке a < b < c < d")
+        return
+    
     x = [i * (d - a) / 999 + a for i in range(1000)]
     mf = trapezoidal_mf(x, a, b, c, d)
+    defuzzified_value = defuzzify_mean_of_maximum(x, mf)
+    
     ax.clear()
     ax.plot(x, mf, 'b-', linewidth=2)
     ax.fill_between(x, mf, color='b', alpha=0.2)
@@ -52,55 +59,8 @@ def calculate_result():
     fuzzy_table.delete(*fuzzy_table.get_children())
     for i in range(len(x)):
         fuzzy_table.insert("", tk.END, values=(x[i], mf[i]))
-
-def calculate_fuzzy_number():
-    global fuzzy_table, fuzzy_result_label
-    x_values = []
-    mu_values = []
-    for item in fuzzy_table.get_children():
-        x, mu = fuzzy_table.item(item, "values")
-        x_values.append(float(x))
-        mu_values.append(float(mu))
-    result = mean_of_maximum(x_values, mu_values)
-    fuzzy_result_label.config(text=f"Четкое число: {result:.2f}")
-
-def remove_node():
-    global tree_table_after
-    selected_item = tree_table_after.selection()
-    if selected_item:
-        tree_table_after.delete(selected_item)
-        update_tree_visualization_after(ax_after, canvas_after)
-
-def reset_default():
-    global params_entry, fuzzy_table, result_label, fuzzy_result_label, ax, canvas
-    params_entry.delete(0, tk.END)
-    fuzzy_table.delete(*fuzzy_table.get_children())
-    result_label.config(text="")
-    fuzzy_result_label.config(text="")
-    ax.clear()
-    canvas.draw()
-    generate_fuzzy_binary_tree()
-
-def generate_fuzzy_binary_tree():
-    global tree_table_before, tree_table_after
-    tree_table_before.delete(*tree_table_before.get_children())
-    tree_table_after.delete(*tree_table_after.get_children())
     
-    def generate_subtree(parent, depth):
-        if depth == 0:
-            return
-        
-        left_child = tree_table_before.insert(parent, "end", text=f"Node {tree_table_before.index(parent) * 2 + 1}", values=())
-        right_child = tree_table_before.insert(parent, "end", text=f"Node {tree_table_before.index(parent) * 2 + 2}", values=())
-        
-        generate_subtree(left_child, depth - 1)
-        generate_subtree(right_child, depth - 1)
-    
-    root = tree_table_before.insert("", "end", text="Root", values=())
-    generate_subtree(root, 3)
-    update_tree_after()
-    update_tree_visualization_after(ax_after, canvas_after)
-    update_tree_visualizations(ax_before, canvas_before)
+    result_label.config(text=f"Четкое число: {defuzzified_value}")
 
 def draw_tree(tree_table, canvas):
     G = nx.DiGraph()
@@ -142,6 +102,61 @@ def update_tree_after():
     
     for root_item in tree_table_before.get_children():
         copy_node("", root_item)
+
+def remove_node():
+    global tree_table_after
+    selected_item = tree_table_after.selection()
+    if selected_item:
+        tree_table_after.delete(selected_item)
+        update_tree_visualization_after(ax_after, canvas_after)
+
+def reset_default():
+    global params_entry, fuzzy_table, result_label, fuzzy_result_label, ax, canvas
+    params_entry.delete(0, tk.END)
+    fuzzy_table.delete(*fuzzy_table.get_children())
+    result_label.config(text="")
+    fuzzy_result_label.config(text="")
+    ax.clear()
+    canvas.draw()
+    generate_fuzzy_binary_tree()
+
+def generate_fuzzy_binary_tree(depth=3):
+    global tree_table_before, tree_table_after
+    tree_table_before.delete(*tree_table_before.get_children())
+    tree_table_after.delete(*tree_table_after.get_children())
+    
+    # Проверка входных данных для нечеткого числа
+    params = [float(p.strip()) for p in params_entry.get().split(',')]
+    a, b, c, d = params
+    if a >= b or b >= c or c >= d:
+        result_label.config(text="Ошибка: Параметры должны быть в порядке a < b < c < d")
+        return
+    
+    # Проверка количества элементов в бинарном дереве
+    num_nodes = (2 ** depth) - 1
+    if num_nodes < 7:
+        result_label.config(text="Ошибка: Бинарное дерево должно содержать не менее 7 элементов")
+        return
+    
+    # Дефазификация нечеткого числа
+    defuzzified_values = [defuzzify_mean_of_maximum([a, b, c, d], trapezoidal_mf([a, b, c, d], a, b, c, d)) for _ in range(num_nodes)]
+    
+    # Генерация бинарного дерева
+    root = tree_table_before.insert("", "end", text="Root", values=(round(defuzzified_values[0]),))
+    generate_subtree(root, depth, defuzzified_values)
+    update_tree_after()
+    update_tree_visualization_after(ax_after, canvas_after)
+    update_tree_visualizations(ax_before, canvas_before)
+
+def generate_subtree(parent, depth, values):
+    if depth == 0:
+        return
+    
+    left_child = tree_table_before.insert(parent, "end", text=f"Node {tree_table_before.index(parent) * 2 + 1}", values=(round(values[tree_table_before.index(parent) * 2 + 1]),))
+    right_child = tree_table_before.insert(parent, "end", text=f"Node {tree_table_before.index(parent) * 2 + 2}", values=(round(values[tree_table_before.index(parent) * 2 + 2]),))
+    
+    generate_subtree(left_child, depth - 1, values)
+    generate_subtree(right_child, depth - 1, values)
 
 def open_trees_window():
     global tree_table_before, tree_table_after, tree_table_static, ax_before, ax_after, ax_static, canvas_before, canvas_after, canvas_static
